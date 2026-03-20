@@ -137,6 +137,7 @@ struct bladerf *dev = NULL;
 char tx_zeros[HACKRF_USB_BUF_SIZE-NUM_PRE_SEND_DATA] = {0};
 volatile char *tx_buf;
 static hackrf_device* device = NULL;
+static uint64_t current_freq_hz = 0;
 
 int tx_callback(hackrf_transfer* transfer) {
   #if 0
@@ -559,6 +560,8 @@ inline int open_board() {
   if( result != HACKRF_SUCCESS ) {
     printf("open_board: hackrf_set_freq() failed: %s (%d)\n", hackrf_error_name(result), result);
     return(-1);
+  } else {
+    current_freq_hz = freq_hz;
   }
 
   result = hackrf_set_sample_rate(device, SAMPLE_PER_SYMBOL*1000000ul);
@@ -601,10 +604,12 @@ inline int close_board() {
 
 	if(device != NULL)
 	{
-    result = hackrf_stop_tx(device);
-    if( result != HACKRF_SUCCESS ) {
-      printf("close_board: hackrf_stop_tx() failed: %s (%d)\n", hackrf_error_name(result), result);
-      return(-1);
+    if (hackrf_is_streaming(device) == HACKRF_TRUE) {
+      result = hackrf_stop_tx(device);
+      if( result != HACKRF_SUCCESS ) {
+        printf("close_board: hackrf_stop_tx() failed: %s (%d)\n", hackrf_error_name(result), result);
+        return(-1);
+      }
     }
 
 		result = hackrf_close(device);
@@ -616,7 +621,7 @@ inline int close_board() {
 
     return(0);
 	} else {
-	  return(-1);
+	  return(0);
 	}
 }
 
@@ -625,16 +630,19 @@ inline int tx_one_buf(char *buf, int length, int channel_number) {
 
   set_freq_by_channel_number(channel_number);
 
+  if (current_freq_hz != freq_hz) {
+    result = hackrf_set_freq(device, freq_hz);
+    if( result != HACKRF_SUCCESS ) {
+      printf("tx_one_buf: hackrf_set_freq() failed: %s (%d)\n", hackrf_error_name(result), result);
+      return(-1);
+    }
+    current_freq_hz = freq_hz;
+  }
+
   //tx_buf = tx_zeros;
   //tx_len = HACKRF_USB_BUF_SIZE-NUM_PRE_SEND_DATA;
   tx_buf = buf;
   tx_len = length;
-
-  // open the board-----------------------------------------
-  if (open_board() == -1) {
-    printf("tx_one_buf: open_board() failed\n");
-    return(-1);
-  }
 
   // first round TX---------------------------------
   stop_tx = 0;
@@ -651,6 +659,12 @@ inline int tx_one_buf(char *buf, int length, int channel_number) {
     if (stop_tx>=9) {
       break;
     }
+  }
+
+  result = hackrf_stop_tx(device);
+  if( result != HACKRF_SUCCESS ) {
+    printf("tx_one_buf: hackrf_stop_tx() failed: %s (%d)\n", hackrf_error_name(result), result);
+    return(-1);
   }
 
   if (do_exit)
@@ -758,12 +772,6 @@ inline int tx_one_buf(char *buf, int length, int channel_number) {
     return(-1);
   }
 #endif
-
-  // close the board---------------------------------------
-  if (close_board() == -1) {
-    printf("tx_one_buf: close_board() failed\n");
-    return(-1);
-  }
 
   do_exit = false;
 
@@ -4307,16 +4315,25 @@ int main(int argc, char** argv) {
   }
   printf("\n");
 
-#ifdef USE_BLADERF
   if (num_packet <= 0) {
     printf("No packets to transmit.\n");
     return(-1);
   }
+
+#ifdef USE_BLADERF
   set_freq_by_channel_number(packets[0].channel_number);
 #endif
 
   if ( init_board() != 0 )
       return(-1);
+
+  #ifndef USE_BLADERF
+  set_freq_by_channel_number(packets[0].channel_number);
+  if (open_board() == -1) {
+    printf("main: open_board() failed\n");
+    goto main_out;
+  }
+  #endif
 
 #if 0
 //-----------------------------------test tx buf---------------------------------
@@ -4396,7 +4413,6 @@ int main(int argc, char** argv) {
       gettimeofday(&time_current_pkt, NULL);
 
       if ( tx_one_buf(packets[i].phy_sample, 2*packets[i].num_phy_sample, packets[i].channel_number) == -1 ){
-        close_board();
         goto main_out;
       }
 
@@ -4419,6 +4435,9 @@ int main(int argc, char** argv) {
 #endif 
 
 main_out:
+  #ifndef USE_BLADERF
+  close_board();
+  #endif
   exit_board();
 	printf("exit\n");
 
