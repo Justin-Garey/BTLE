@@ -417,7 +417,7 @@ inline int init_board() {
       bladerf_close(dev);
       return EXIT_FAILURE;
   } else {
-    fprintf(stdout, "bladerf_set_bandwidth: %d %s\n", actual,
+    fprintf(stdout, "BladeRF Set Bandwidth: %d %s\n", actual,
               bladerf_strerror(status));
   }
   
@@ -428,7 +428,7 @@ inline int init_board() {
       bladerf_close(dev);
       return EXIT_FAILURE;
   } else {
-    fprintf(stdout, "bladerf_set_gain: %d %s\n", tx_gain_db,
+    fprintf(stdout, "BladeRF Set TX Gain: %d dB (%s)\n", tx_gain_db,
               bladerf_strerror(status));
   }
 
